@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: client-go
+  namespace: kube-system
+  labels:
+    role: my-list
+spec:
+  serviceAccountName: filebeat
+  containers:
+    - name: clientgo
+      image: docker.io/andreasgkizas/2159_17:v5
+      command: ["./clientgo"]
