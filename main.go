@@ -19,7 +19,10 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/http"
 	"time"
+
+	_ "net/http/pprof"
 
 	"k8s.io/klog/v2"
 
@@ -192,6 +195,11 @@ func main() {
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "absolute path to the kubeconfig file")
 	flag.StringVar(&master, "master", "", "master url")
 	flag.Parse()
+
+	// Server for pprof
+	go func() {
+		fmt.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
 
 	// creates the connection
 	config, err := clientcmd.BuildConfigFromFlags(master, kubeconfig)
