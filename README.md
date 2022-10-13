@@ -22,3 +22,9 @@ docker push andreasgkizas/2159_17:v5
 
 See worker_manifestv3_workingGKE.yaml.txt as working one provided to customer
 Also serviceAccountName: filebeat is used inside, assumes that filebeats service account is already present. See [here](https://github.com/elastic/beats/blob/main/deploy/kubernetes/filebeat-kubernetes.yaml#L135) 
+
+## Profiling the program
+
+1. `go build && ./clientgo --kubeconfig /home/chrismark/.kube/config`
+2. `apt-get install graphviz gv` or `brew install graphviz` 
+3`go tool pprof -png http://localhost:6060/debug/pprof/heap > out.png`
