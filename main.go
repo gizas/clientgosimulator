@@ -24,8 +24,6 @@ import (
 
 	_ "net/http/pprof"
 
-	"k8s.io/klog/v2"
-
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/util/runtime"
@@ -39,14 +37,14 @@ import (
 
 // Controller demonstrates how to implement a controller with client-go.
 type Controller struct {
-	indexer  cache.Indexer
-	queue    workqueue.RateLimitingInterface
+	indexer  cache.Store
+	queue    workqueue.Interface
 	informer cache.Controller
 	resource string
 }
 
 // NewController creates a new Controller.
-func NewController(queue workqueue.RateLimitingInterface, indexer cache.Indexer, informer cache.Controller, resource string) *Controller {
+func NewController(queue workqueue.Interface, indexer cache.Indexer, informer cache.Controller, resource string) *Controller {
 	return &Controller{
 		informer: informer,
 		indexer:  indexer,
@@ -55,9 +53,15 @@ func NewController(queue workqueue.RateLimitingInterface, indexer cache.Indexer,
 	}
 }
 
+type item struct {
+	object    interface{}
+	objectRaw interface{}
+	state     string
+}
+
 func (c *Controller) processNextItem() bool {
 	// Wait until there is a new item in the working queue
-	key, quit := c.queue.Get()
+	obj, quit := c.queue.Get()
 	if quit {
 		return false
 	}
@@ -65,12 +69,25 @@ func (c *Controller) processNextItem() bool {
 	// Tell the queue that we are done with processing this key. This unblocks the key for other workers
 	// This allows safe parallel processing because two pods with the same key are never processed in
 	// parallel.
-	defer c.queue.Done(key)
+	defer c.queue.Done(obj)
+
+	//var entry *item
+	//var ok bool
+	//if entry, ok = obj.(*item); !ok {
+	//	fmt.Println("\n\n\nCannot convert to item obj %v", obj)
+	//	fmt.Println("Key is %v", obj.(string))
+	//	return true
+	//}
+
+	//key, ok := entry.object.(string)
+	//if !ok {
+	//	return false
+	//}
 
 	// Invoke the method containing the business logic
-	err := c.syncToStdout(key.(string))
+	_ = c.syncToStdout(obj.(string))
 	// Handle the error if something went wrong during the execution of the business logic
-	c.handleErr(err, key)
+	//c.handleErr(err, obj)
 	return true
 }
 
@@ -80,10 +97,9 @@ func (c *Controller) processNextItem() bool {
 func (c *Controller) syncToStdout(key string) error {
 	resource := c.resource
 	if resource == "pod" {
-		fmt.Println("Currently watching", len(c.indexer.ListKeys()), resource)
-		_, exists, err := c.indexer.GetByKey(key)
+		o, exists, err := c.indexer.GetByKey(key)
+		fmt.Println("\n\n\nCurrently watching key %v", o)
 		if err != nil {
-			klog.Errorf("Fetching object with key %s from store failed with %v", key, err)
 			return err
 		}
 
@@ -101,7 +117,6 @@ func (c *Controller) syncToStdout(key string) error {
 	} else if resource == "namespace" {
 		obj, exists, err := c.indexer.GetByKey(key)
 		if err != nil {
-			klog.Errorf("Fetching object with key %s from store failed with %v", key, err)
 			return err
 		}
 
@@ -116,7 +131,6 @@ func (c *Controller) syncToStdout(key string) error {
 	} else if resource == "node" {
 		obj, exists, err := c.indexer.GetByKey(key)
 		if err != nil {
-			klog.Errorf("Fetching object with key %s from store failed with %v", key, err)
 			return err
 		}
 
@@ -135,28 +149,6 @@ func (c *Controller) syncToStdout(key string) error {
 
 // handleErr checks if an error happened and makes sure we will retry later.
 func (c *Controller) handleErr(err error, key interface{}) {
-	if err == nil {
-		// Forget about the #AddRateLimited history of the key on every successful synchronization.
-		// This ensures that future processing of updates for this key is not delayed because of
-		// an outdated error history.
-		c.queue.Forget(key)
-		return
-	}
-
-	// This controller retries 5 times if something goes wrong. After that, it stops trying.
-	if c.queue.NumRequeues(key) < 5 {
-		klog.Infof("Error syncing pod %v: %v", key, err)
-
-		// Re-enqueue the key rate limited. Based on the rate limiter on the
-		// queue and the re-enqueue history, the key will be processed later again.
-		c.queue.AddRateLimited(key)
-		return
-	}
-
-	c.queue.Forget(key)
-	// Report to an external entity that, even after several retries, we could not successfully process this key
-	runtime.HandleError(err)
-	klog.Infof("Dropping pod %q out of the queue: %v", key, err)
 }
 
 // Run begins watching and syncing.
@@ -165,7 +157,6 @@ func (c *Controller) Run(workers int, stopCh chan struct{}) {
 
 	// Let the workers stop when we are done
 	defer c.queue.ShutDown()
-	klog.Info("Starting controller ", c.resource)
 
 	go c.informer.Run(stopCh)
 
@@ -180,7 +171,6 @@ func (c *Controller) Run(workers int, stopCh chan struct{}) {
 	}
 
 	<-stopCh
-	klog.Info("Stopping controller ", c.resource)
 }
 
 func (c *Controller) runWorker() {
@@ -213,7 +203,6 @@ func main() {
 	// creates the clientset
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
-		klog.Fatal(err)
 	}
 
 	// create the pod watcher
@@ -225,9 +214,9 @@ func main() {
 	//fmt.Printf("Size of Pods: %T, %d\n", pods, unsafe.Sizeof(pods))
 
 	// create the workqueue
-	queue := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
-	queuen := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
-	queueno := workqueue.NewRateLimitingQueue(workqueue.DefaultControllerRateLimiter())
+	queue := workqueue.NewNamed("pod")
+	queuen := workqueue.NewNamed("ns")
+	queueno := workqueue.NewNamed("node")
 
 	// Bind the workqueue to a cache with the help of an informer. This way we make sure that
 	// whenever the cache is updated, the pod key is added to the workqueue.
