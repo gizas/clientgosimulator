@@ -42,7 +42,7 @@ import (
 type Controller struct {
 	indexer  cache.Store
 	queue    workqueue.Interface
-	informer cache.Controller
+	informer cache.SharedInformer
 	resource string
 }
 
@@ -53,7 +53,7 @@ type Pod = v1.Pod
 type Resource = runtimeObj.Object
 
 // NewController creates a new Controller.
-func NewController(queue workqueue.Interface, indexer cache.Store, informer cache.Controller, resource string) *Controller {
+func NewController(queue workqueue.Interface, indexer cache.Store, informer cache.SharedInformer, resource string) *Controller {
 	return &Controller{
 		informer: informer,
 		indexer:  indexer,
