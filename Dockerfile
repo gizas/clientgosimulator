@@ -16,11 +16,10 @@ FROM golang:1.17-alpine
 WORKDIR /go/src/app
 
 COPY main.go .
-COPY  vendor /go/src/app/vendor
 COPY  go.mod .
 COPY go.sum .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod vendor -o clientgo
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o clientgo
 
 
 FROM alpine:latest
