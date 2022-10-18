@@ -146,6 +146,28 @@ func (c *Controller) syncToStdout(key string) error {
 
 // handleErr checks if an error happened and makes sure we will retry later.
 func (c *Controller) handleErr(err error, key interface{}) {
+	//if err == nil {
+	//	// Forget about the #AddRateLimited history of the key on every successful synchronization.
+	//	// This ensures that future processing of updates for this key is not delayed because of
+	//	// an outdated error history.
+	//	c.queue.Forget(key)
+	//	return
+	//}
+	//
+	//// This controller retries 5 times if something goes wrong. After that, it stops trying.
+	//if c.queue.NumRequeues(key) < 5 {
+	//	klog.Infof("Error syncing pod %v: %v", key, err)
+	//
+	//	// Re-enqueue the key rate limited. Based on the rate limiter on the
+	//	// queue and the re-enqueue history, the key will be processed later again.
+	//	c.queue.AddRateLimited(key)
+	//	return
+	//}
+	//
+	//c.queue.Forget(key)
+	//// Report to an external entity that, even after several retries, we could not successfully process this key
+	//runtime.HandleError(err)
+	//klog.Infof("Dropping pod %q out of the queue: %v", key, err)
 }
 
 // Run begins watching and syncing.
