@@ -17,16 +17,19 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/watch"
 	"net/http"
 	"time"
 
 	_ "net/http/pprof"
 
 	v1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/apimachinery/pkg/util/runtime"
+	runtimeObj "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -43,8 +46,14 @@ type Controller struct {
 	resource string
 }
 
+// Pod data
+type Pod = v1.Pod
+
+// Resource data
+type Resource = runtimeObj.Object
+
 // NewController creates a new Controller.
-func NewController(queue workqueue.Interface, indexer cache.Indexer, informer cache.Controller, resource string) *Controller {
+func NewController(queue workqueue.Interface, indexer cache.Store, informer cache.Controller, resource string) *Controller {
 	return &Controller{
 		informer: informer,
 		indexer:  indexer,
@@ -71,19 +80,6 @@ func (c *Controller) processNextItem() bool {
 	// parallel.
 	defer c.queue.Done(obj)
 
-	//var entry *item
-	//var ok bool
-	//if entry, ok = obj.(*item); !ok {
-	//	fmt.Println("\n\n\nCannot convert to item obj %v", obj)
-	//	fmt.Println("Key is %v", obj.(string))
-	//	return true
-	//}
-
-	//key, ok := entry.object.(string)
-	//if !ok {
-	//	return false
-	//}
-
 	// Invoke the method containing the business logic
 	_ = c.syncToStdout(obj.(string))
 	// Handle the error if something went wrong during the execution of the business logic
@@ -98,7 +94,8 @@ func (c *Controller) syncToStdout(key string) error {
 	resource := c.resource
 	if resource == "pod" {
 		o, exists, err := c.indexer.GetByKey(key)
-		fmt.Println("\n\n\nCurrently watching key %v", o)
+		obj := o.(*Pod)
+		fmt.Println("\nDiscovered Pod ", obj.Name)
 		if err != nil {
 			return err
 		}
@@ -205,18 +202,19 @@ func main() {
 	if err != nil {
 	}
 
-	// create the pod watcher
-	podListWatcher := cache.NewListWatchFromClient(clientset.CoreV1().RESTClient(), "pods", "", fields.Everything())
-	namespaceListWatcher := cache.NewListWatchFromClient(clientset.CoreV1().RESTClient(), "namespaces", "", fields.Everything())
-	nodeListWatcher := cache.NewListWatchFromClient(clientset.CoreV1().RESTClient(), "nodes", "", fields.Everything())
-
 	//pods, err := podListWatcher.ListFunc(meta_v1.ListOptions{})
 	//fmt.Printf("Size of Pods: %T, %d\n", pods, unsafe.Sizeof(pods))
 
+	var store cache.Store
+	var queue workqueue.Interface
+
+	informer, _, err := NewInformer(clientset, &Pod{}, nil)
+	if err != nil {
+	}
+
 	// create the workqueue
-	queue := workqueue.NewNamed("pod")
-	queuen := workqueue.NewNamed("ns")
-	queueno := workqueue.NewNamed("node")
+	store = informer.GetStore()
+	queue = workqueue.NewNamed("pod")
 
 	// Bind the workqueue to a cache with the help of an informer. This way we make sure that
 	// whenever the cache is updated, the pod key is added to the workqueue.
@@ -224,7 +222,7 @@ func main() {
 	// of the Pod than the version which was responsible for triggering the update.
 
 	//POD
-	indexer, informer := cache.NewIndexerInformer(podListWatcher, &v1.Pod{}, 0, cache.ResourceEventHandlerFuncs{
+	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err == nil {
@@ -245,58 +243,8 @@ func main() {
 				queue.Add(key)
 			}
 		},
-	}, cache.Indexers{})
-	controller := NewController(queue, indexer, informer, "pod")
-
-	//Namespace
-	indexern, informern := cache.NewIndexerInformer(namespaceListWatcher, &v1.Namespace{}, 0, cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			key, err := cache.MetaNamespaceKeyFunc(obj)
-			if err == nil {
-				queuen.Add(key)
-			}
-		},
-		UpdateFunc: func(old interface{}, new interface{}) {
-			key, err := cache.MetaNamespaceKeyFunc(new)
-			if err == nil {
-				queuen.Add(key)
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			// IndexerInformer uses a delta queue, therefore for deletes we have to use this
-			// key function.
-			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
-			if err == nil {
-				queuen.Add(key)
-			}
-		},
-	}, cache.Indexers{})
-	controllern := NewController(queuen, indexern, informern, "namespace")
-
-	//Node
-	indexerno, informerno := cache.NewIndexerInformer(nodeListWatcher, &v1.Node{}, 0, cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			key, err := cache.MetaNamespaceKeyFunc(obj)
-			if err == nil {
-				queueno.Add(key)
-			}
-		},
-		UpdateFunc: func(old interface{}, new interface{}) {
-			key, err := cache.MetaNamespaceKeyFunc(new)
-			if err == nil {
-				queueno.Add(key)
-			}
-		},
-		DeleteFunc: func(obj interface{}) {
-			// IndexerInformer uses a delta queue, therefore for deletes we have to use this
-			// key function.
-			key, err := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
-			if err == nil {
-				queueno.Add(key)
-			}
-		},
-	}, cache.Indexers{})
-	controllerno := NewController(queueno, indexerno, informerno, "node")
+	})
+	controller := NewController(queue, store, informer, "pod")
 
 	// We can now warm up the cache for initial synchronization.
 	// Let's suppose that we knew about a pod "mypod" on our last run, therefore add it to the cache.
@@ -313,9 +261,40 @@ func main() {
 	stop := make(chan struct{})
 	defer close(stop)
 	go controller.Run(1, stop)
-	go controllern.Run(1, stop)
-	go controllerno.Run(1, stop)
 
 	// Wait forever
 	select {}
+}
+
+// NewInformer creates an informer for a given resource
+func NewInformer(client kubernetes.Interface, resource Resource, indexers cache.Indexers) (cache.SharedInformer, string, error) {
+	var objType string
+
+	var listwatch *cache.ListWatch
+	ctx := context.TODO()
+	switch resource.(type) {
+	case *Pod:
+		p := client.CoreV1().Pods("")
+		listwatch = &cache.ListWatch{
+			ListFunc: func(options metav1.ListOptions) (runtimeObj.Object, error) {
+				//nodeSelector(&options, opts)
+				return p.List(ctx, options)
+			},
+			WatchFunc: func(options metav1.ListOptions) (watch.Interface, error) {
+				//nodeSelector(&options, opts)
+				return p.Watch(ctx, options)
+			},
+		}
+
+		objType = "pod"
+
+	default:
+		return nil, "", fmt.Errorf("unsupported resource type for watching %T", resource)
+	}
+
+	if indexers == nil {
+		indexers = cache.Indexers{}
+	}
+	syncPeriod := time.Second * 120
+	return cache.NewSharedIndexInformer(listwatch, resource, syncPeriod, indexers), objType, nil
 }
