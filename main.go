@@ -94,10 +94,12 @@ func (c *Controller) syncToStdout(key string) error {
 	resource := c.resource
 	if resource == "pod" {
 		o, exists, err := c.indexer.GetByKey(key)
-		obj := o.(*Pod)
-		fmt.Println("\nDiscovered Pod ", obj.Name)
 		if err != nil {
 			return err
+		}
+		if o != nil {
+			obj := o.(*Pod)
+			fmt.Println("\nDiscovered Pod ", obj.Name)
 		}
 
 		if !exists {
